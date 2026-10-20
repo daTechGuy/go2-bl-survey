@@ -1,0 +1,5 @@
+# Post-processing only (tools/). The package, its scan CLI and the test suite
+# do not need any of this.
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7

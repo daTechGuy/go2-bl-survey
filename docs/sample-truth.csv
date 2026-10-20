@@ -1,0 +1,6 @@
+addr,category,privacy,x,y
+c3:00:00:00:be:01,beacon,public,5.0,13.0
+c3:00:00:00:5e:02,smarthome,public,11.0,14.0
+c3:00:00:00:a1:03,tracker,static-random,24.0,5.5
+c3:00:00:00:7e:04,wearable,public,3.5,4.5
+7f:00:00:00:db:05,phone,resolvable-random,17.0,9.5

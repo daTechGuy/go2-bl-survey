@@ -11,11 +11,20 @@ Sibling to **[go2-rf-survey](../go2-rf-survey)** — the mobility, SLAM and
 pose-join architecture are the same; only the sensor changes. This repo vendors
 the parts it needs so it stands alone.
 
-**Status:** off-robot pipeline works end to end. Decoder, live capture, CSV and
-aggregation are written and tested; everything that needs the robot (pose join,
-heatmaps) is the remaining work. Verified against a real radio — one 6 s scan on
-a workstation saw 440 sightings and classified Find My trackers, AirPods and
-beacons live.
+**Status:** the entire off-robot pipeline works and is proven end to end —
+decode → geotag → localize → render. Verified two ways: against a **real radio**
+(a 6 s workstation scan saw 440 sightings and classified Find My trackers,
+AirPods and beacons live) and against **known ground truth** (a synthetic census
+localizes persistent devices to ~0.5 m and correctly refuses to locate a
+rotating phone). What remains all needs the robot: the ROS node that feeds real
+SLAM poses into the already-written pose-join seam.
+
+![sample census](docs/sample-census.png)
+
+*Synthetic data with known device positions — ○ estimated location, ★ actual.
+It exists so the whole chain is provably correct before the robot produces
+anything. The tracker's larger error is honest: it sits in the one room the
+route skips, heard only through a wall.*
 
 > ### ▶ Resume here
 >
@@ -116,7 +125,7 @@ Verified against the Bluetooth SIG Assigned Numbers and pinned by tests:
 
 ```bash
 python run_tests.py
-# Ran 70 tests ... OK
+# Ran 91 tests ... OK
 ```
 
 ## Live capture (off-robot)
@@ -139,6 +148,40 @@ On the robot, capture switches to a passive nRF52840 sniffer feeding
 `decode_advertisement()` raw bytes directly (phase 03) — this CLI is its
 off-robot cousin for building the lookup tables.
 
+## Post-processing (off-robot)
+
+The render chain is proven on synthetic data with known ground truth before the
+robot exists — the same discipline go2-rf-survey uses. `occupancy.py` is
+vendored from that repo; the generator and renderer are BLE-specific.
+
+```bash
+pip install -r tools/requirements.txt
+python tools/make_synthetic_census.py --out docs/sample
+python tools/heatmap.py docs/sample.csv --map docs/sample.yaml \
+    --truth docs/sample-truth.csv --out docs/
+```
+
+`heatmap.py` draws one coverage panel per category (strongest RSSI of any device
+in it, heard at each position), masked by walls and by distance from a real
+sample, and overlays each persistent device's **estimated** location
+(`ble_census.locate`) against its **actual** position when a truth file is given
+— printing the localization error. On the sample that's ~0.5 m for well-sampled
+devices; the rotating phone is deliberately never located.
+
+## Localization and the pose-join seam
+
+Two pure modules carry the on-robot logic so it is testable before the robot:
+
+- **[`posejoin.py`](ble_census/posejoin.py)** — a pose buffer that pairs a
+  sighting's timestamp to the robot pose then, interpolating between bracketing
+  TF poses (yaw on the shortest arc) and **discarding** a sighting across a TF
+  gap rather than placing it at a guess (go2-rf-survey's D4/R4). The phase-03
+  ROS node is a thin shell over this.
+- **[`locate.py`](ble_census/locate.py)** — the "find the hidden tracker"
+  estimate: an RSSI-weighted centroid of a device's sightings. Only for
+  persistent addresses — it refuses rotating ones, because averaging across a
+  phone's ever-changing address is meaningless.
+
 ## Build sequence
 
 Ordered by dependency. The deliverable (a category heatmap of a real floor)
@@ -152,14 +195,17 @@ lands at phase 04, reusing go2-rf-survey's renderer.
 - [ ] **02 · Extend the tables** — add the vendor IDs and service UUIDs your
       own environment actually emits. *Exit: your known AirTag / sensor /
       wearable classify correctly from a captured log.* ← **next**
-- [ ] **03 · Node integration** — feed the decoder go2-rf-survey's pose-join +
-      flush path; `writer.py` already takes the pose dict. *Exit: CSV rows
-      carry a real SLAM pose.*
-- [ ] **04 · Category heatmaps** ← **deliverable** — feed `heatmap.py`, render
-      per category. *Exit: one map per category over a real floor.*
-- [ ] **05 · Classroom layer** — `Aggregator` already computes the
-      persistent-vs-rotating fraction and category counts; add tracker alerts
-      and the "your own devices light up" live view on top.
+- [ ] **03 · Node integration** — the pure half is done: `posejoin.py` (pose
+      buffer + stale-discard) and `writer.py` (takes the pose dict). Remaining
+      is the ROS shell that feeds TF poses in. *Exit: CSV rows carry a real
+      SLAM pose.*
+- [x] **04 · Category heatmaps** ← **deliverable** — `heatmap.py` renders per
+      category with located-device overlays. *Exit: proven on synthetic data
+      with ground truth; swap in a real CSV + map on the robot.* ✅ *(synthetic)*
+- [x] **05 · Localization + classroom numbers** — `locate.py` finds persistent
+      devices (~0.5 m on the fixture); `Aggregator` gives the
+      persistent-vs-rotating fraction and category counts. ✅ Remaining: wire
+      these into a live "your devices light up" view on the robot.
 
 ## Hardware delta from the survey rig
 
@@ -196,9 +242,17 @@ ble_census/
   ble_scan.py          ✅ advertisement decoder — pure (raw + parsed paths)
   census.py            ✅ live-view aggregation — pure
   writer.py            ✅ CSV schema, one row per sighting — pure
+  posejoin.py          ✅ pose buffer + stale-discard geotag seam — pure
+  locate.py            ✅ RSSI-weighted device localization — pure
   scan.py              ✅ `python -m ble_census.scan` live capture (bleak)
-tests/                 ✅ 70 tests incl. malformed packets, both decode paths
+tools/                    post-processing, runs off-robot (numpy/scipy/mpl)
+  occupancy.py            map_server PGM/YAML I/O (vendored from go2-rf-survey)
+  make_synthetic_census.py  floorplan + census + ground truth
+  heatmap.py              per-category coverage + localization overlay
+tests/                 ✅ 91 tests incl. malformed packets, both decode paths,
+                          pose interpolation/stale-discard, localization
 run_tests.py           ✅ all suites, no dependencies
 requirements.txt          bleak — live capture only
+docs/                     sample.{pgm,yaml,csv}, sample-truth.csv, the render
 README.md
 ```
