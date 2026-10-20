@@ -1,0 +1,3 @@
+# Live-capture CLI only (ble_census/scan.py). The decoder, writer, aggregator
+# and their tests need nothing but the standard library.
+bleak>=0.21

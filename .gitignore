@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# captured surveys — real device addresses, don't commit
+*.csv
+!docs/sample*.csv
